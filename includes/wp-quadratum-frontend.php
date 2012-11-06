@@ -4,7 +4,7 @@
  * WP_QuadratumFrontEnd - handles the front end display for the plugin
  */
 
-class WP_QuadratumFrontEnd extends WP_PluginBase {
+class WP_QuadratumFrontEnd extends WP_PluginBase_v1_1 {
 	private	$mxn;
 	
 	/**
@@ -12,13 +12,13 @@ class WP_QuadratumFrontEnd extends WP_PluginBase {
 	 */
 	
 	function __construct () {
-		$this->mxn = new WP_MXNHelper;
+		$this->mxn = new WP_MXNHelper_v2_0;
 		$this->mxn->register_callback ('cloudmade', array ($this, 'cloudmade_mxn_callback'));
 		$this->mxn->register_callback ('nokia', array ($this, 'nokia_mxn_callback'));
 		$this->mxn->register_callback ('googlev3', array ($this, 'googlev3_mxn_callback'));
 
 		$provider = WP_Quadratum::get_option ('provider');
-		$this->mxn->set_providers (array ($provider));
+		$this->mxn->set_frontend_providers (array ($provider));
 		
 		add_shortcode ('wp_quadratum', array ($this, 'shortcode'));
 	}
@@ -133,7 +133,16 @@ class WP_QuadratumFrontEnd extends WP_PluginBase {
 		$content[] = '<div id="' . $args['container-id'] . '" class="' . $args['container-class'] .'" style="width:' . $args['width'] . 'px;">';
 		$content[] = '<div id="' . $args['map-id'] . '" class="' . $args['map-class'] . '" style="width:' . $args['width'] . 'px; height:' . $args['height'] . 'px;"></div>';
 		$content[] = '<div class="' . $args['venue-class'] . '">';
-		$content[] = '<h5>Last seen at <a href="' . $venue_url . '" target="_blank">' . $venue->name . '</a> on ' . date ("d M Y G:i T", $checkin->createdAt) . '</h5>';
+		
+		$params = array (
+			'venue-url' => $venue_url,
+			'venue-name' => $venue->name,
+			'checked-in-at' => $checkin->createdAt
+		);
+		
+		$strapline = '<h5>Last seen at <a href="' . $venue_url . '" target="_blank">' . $venue->name . '</a> on ' . date ("d M Y G:i T", $checkin->createdAt) . '</h5>';
+		$content[] = apply_filters ('wp_quadratum_strapline', $strapline, $params);
+		
 		$content[] = '</div>';
 		$content[] = '</div>';
 
