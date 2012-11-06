@@ -4,7 +4,7 @@
  * WP_QuadratumAdmin - handles the back end admin functions for the plugin
  */
 
-class WP_QuadratumAdmin extends WP_PluginBase {
+class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 	private $mxn;
 	
 	static $tab_names;
@@ -14,7 +14,7 @@ class WP_QuadratumAdmin extends WP_PluginBase {
 	 */
 	
 	function __construct () {
-		$this->mxn = new WP_MXNHelper;
+		$this->mxn = new WP_MXNHelper_v2_0;
 		
 		self::$tab_names = array (
 			'foursquare' => "Foursquare",
@@ -84,8 +84,16 @@ class WP_QuadratumAdmin extends WP_PluginBase {
 			wp_enqueue_script ('dashboard');
 			wp_enqueue_script ('jquery');
 			$deps = array ('jquery');
-			wp_enqueue_script ('wp-quadratum-admin-script', WPQUADRATUM_URL . 'js/wp-quadratum-admin.min.js', $deps);
-			//wp_enqueue_script ('wp-quadratum-admin-script', WPQUADRATUM_URL . 'js/wp-quadratum-admin.js', $deps);
+			
+			if (WP_DEBUG || WPQUADRATUM_DEBUG) {
+				$js_url = 'js/wp-quadratum-admin.js';
+			}
+			
+			else {
+				$js_url = 'js/wp-quadratum-admin.min.js';
+			}
+			
+			wp_enqueue_script ('wp-quadratum-admin-script', WPQUADRATUM_URL . $js_url, $deps);
 		}
 	}
 	
@@ -102,8 +110,16 @@ class WP_QuadratumAdmin extends WP_PluginBase {
 			wp_enqueue_style ('dashboard');
 			wp_enqueue_style ('global');
 			wp_enqueue_style ('wp-admin');
-			wp_enqueue_style ('wp-quadratum-admin',	WPQUADRATUM_URL . 'css/wp-quadratum-admin.min.css');
-			//wp_enqueue_style ('wp-quadratum-admin',	WPQUADRATUM_URL . 'css/wp-quadratum-admin.css');
+			
+			if (WP_DEBUG || WPQUADRATUM_DEBUG) {
+				$css_url = 'css/wp-quadratum-admin.css';
+			}
+			
+			else {
+				$css_url = 'css/wp-quadratum-admin.min.css';
+			}
+			
+			wp_enqueue_style ('wp-quadratum-admin',	WPQUADRATUM_URL . $css_url);
 		}
 	}
 
@@ -185,6 +201,7 @@ class WP_QuadratumAdmin extends WP_PluginBase {
 					$this->admin_upgrade_option ($options, 'google_sensor', 'false');
 					$this->admin_upgrade_option ($options, 'cloudmade_key', '');
 				
+				case '120':
 					$options['version'] = WP_Quadratum::VERSION;
 					$upgrade_settings = true;
 
@@ -223,7 +240,7 @@ class WP_QuadratumAdmin extends WP_PluginBase {
 		//$openmq_settings = array ();
 		
 		$tab = $this->admin_validate_tab ();
-		$providers = WP_MXNHelper::get_supported_providers ();
+		$providers = $this->mxn->get_supported_providers ();
 		
 		switch ($tab) {
 			case 'maps':
@@ -389,7 +406,7 @@ class WP_QuadratumAdmin extends WP_PluginBase {
 						$client_id = $options['client_id'];
 						$client_secret = $options['client_secret'];
 						$redirect_url = WP_Quadratum::make_redirect_url ();
-						$fh = new FoursquareHelper ($client_id, $client_secret, $redirect_url);
+						$fh = new FoursquareHelper_v1_0 ($client_id, $client_secret, $redirect_url);
 						$foursquare_settings[] = '<p class="submit">'
 							. '<a href="' . $fh->authentication_link () . '" class="button-primary">'
 							. __('Connect to Foursquare') . '</a>'
@@ -646,7 +663,7 @@ class WP_QuadratumAdmin extends WP_PluginBase {
 			. sprintf (__('Firstly ... take a look at <a href="%s">this</a> before firing off a question.'), 'http://www.vicchi.org/2012/03/31/asking-for-wordpress-plugin-help-and-support-without-tears/')
 			. '</li>'
 			. '<li>'
-			. __('Then ... ask a question on the <a href="http://wordpress.org/tags/wp-quadratum?forum_id=10">WordPress support forum</a>; this is by far the best way so that other users can follow the conversation.')
+			. __('Then ... ask a question on the <a href="http://wordpress.org/support/plugin/wp-quadratum">WordPress support forum</a>; this is by far the best way so that other users can follow the conversation.')
 			. '</li>'
 			. '<li>'
 			. __('Or ... ask me a question on Twitter; I\'m <a href="http://twitter.com/vicchi">@vicchi</a>.')
@@ -666,7 +683,7 @@ class WP_QuadratumAdmin extends WP_PluginBase {
 			. __('Rate the plugin on the <a href="http://wordpress.org/extend/plugins/wp-quadratum/">WordPress plugin repository</a>.')
 			. '</li>'
 			. '<li>'
-			. __('WP Quadratum is both free as in speech and free as in beer. No donations are required; <a href="http://www.vicchi.org/codeage/donate/">here\'s why</a>.')
+			. __('WP Quadratum is both free as in speech and free as in beer; <a href="http://www.vicchi.org/codeage/donate/">here\'s why</a>.')
 			. '</li>'
 			. '</ul>'
 			. '</p>';
