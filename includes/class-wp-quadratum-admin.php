@@ -5,6 +5,7 @@
  */
 
 class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
+	private static $instance;
 	private $mxn;
 	
 	static $tab_names;
@@ -13,8 +14,9 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 	 * Class constructor
 	 */
 	
-	function __construct () {
-		$this->mxn = new WP_MXNHelper_v2_0;
+	private function __construct () {
+		$this->mxn = WP_Mapstraction::get_instance();
+		//$this->mxn = new WP_MXNHelper_v2_0;
 		
 		self::$tab_names = array (
 			'foursquare' => "Foursquare",
@@ -28,6 +30,14 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 		$this->hook ('admin_print_scripts');
 		$this->hook ('admin_print_styles');
 		$this->hook (WP_Quadratum::make_settings_link (), 'admin_settings_link');
+	}
+	
+	public static function get_instance() {
+		if (!isset(self::$instance)) {
+			$class = __CLASS__;
+			self::$instance = new $class();
+		}
+		return self::$instance;
 	}
 
 	/**
@@ -50,7 +60,7 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 	function admin_notices () {
 		if (current_user_can ('manage_options')) {
 			$content = sprintf (__('You need to grant WP Quadratum access to your Foursquare account to show your checkins; you can go to the <a href="%s">WP Quadratum Settings And Options page</a> to do this now'),
-				admin_url ('options-general.php?page=wp-quadratum/includes/wp-quadratum-admin.php'));
+				admin_url ('options-general.php?page=wp-quadratum/includes/class-wp-quadratum-admin.php'));
 
 			echo '<div class="error">' . $content . '</div>';
 		}
@@ -85,15 +95,10 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 			wp_enqueue_script ('jquery');
 			$deps = array ('jquery');
 			
-			if (WP_DEBUG || WPQUADRATUM_DEBUG) {
-				$js_url = 'js/wp-quadratum-admin.js';
-			}
-			
-			else {
-				$js_url = 'js/wp-quadratum-admin.min.js';
-			}
-			
-			wp_enqueue_script ('wp-quadratum-admin-script', WPQUADRATUM_URL . $js_url, $deps);
+			$handle = 'wp-quadratum-admin-script';
+			$src = WPQUADRATUM_URL . 'js/wp-quadratum-admin';
+			$src = WP_Quadratum::make_js_path($src);
+			wp_enqueue_script ($handle, $src, $deps);
 		}
 	}
 	
@@ -111,15 +116,10 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 			wp_enqueue_style ('global');
 			wp_enqueue_style ('wp-admin');
 			
-			if (WP_DEBUG || WPQUADRATUM_DEBUG) {
-				$css_url = 'css/wp-quadratum-admin.css';
-			}
-			
-			else {
-				$css_url = 'css/wp-quadratum-admin.min.css';
-			}
-			
-			wp_enqueue_style ('wp-quadratum-admin',	WPQUADRATUM_URL . $css_url);
+			$handle = 'wp-quadratum-admin-css';
+			$src = WPQUADRATUM_URL . 'css/wp-quadratum-admin';
+			$src = WP_Quadratum::make_css_path($src);
+			wp_enqueue_style ($handle, $src);
 		}
 	}
 
@@ -129,7 +129,7 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 	 */
 
 	function admin_settings_link ($links) {
-		$settings_link = '<a href="options-general.php?page=wp-quadratum/includes/wp-quadratum-admin.php">'
+		$settings_link = '<a href="options-general.php?page=wp-quadratum/includes/class-wp-quadratum-admin.php">'
 			. __('Settings')
 			. '</a>';
 		array_unshift ($links, $settings_link);
@@ -202,6 +202,81 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 					$this->admin_upgrade_option ($options, 'cloudmade_key', '');
 				
 				case '120':
+				case '130':
+					// This is verging dangerously close to fugly but, as far as I can tell
+					// there's no API access to the settings for each widget, so ...
+					//
+					// The settings for all instances of a widget (active as well as inactive)
+					// are stored in a serialised array in the wp_options table called
+					// widget_'reference', where 'reference' is the lowercased version of
+					// the name passed to register_widget(). So ...
+					//
+					// The settings for all instances of our widget are stored in the
+					// serialised array widget_wp_quadratum_widget, which will look
+					// something like this ...
+					//
+					// array (
+					//	2 => 
+					//		array (
+					//			'title' => 'Last Foursquare Checkin',
+					//			'width' => 200,
+					//			'height' => 200,
+					//			'zoom' => 16,
+					//			'id' => 1,
+					//		),
+					//	3 => 
+					//		array ( .. ),
+					//	'_multiwidget' => 1,
+					// )
+					//
+					// We can't tell whether a widget is active or inactive from this array
+					// (but see get_widgets() in class-wp-quadratum-frontend.php for how to
+					// do that), but we don't need to here. All we need to do is skip non
+					// integer array indices (such as _multiwidget) and for every other
+					// meta array, prune the now obsolete 'id' setting and, if they don't
+					// exist, add in defaulted settings for the new 'width_units' and
+					// 'height_units' settings. Simple really.
+					
+					$widgets = get_option('widget_wp_quadratumwidget');
+					if (is_array($widgets)) {
+						$upgraded = array();
+						foreach ($widgets as $index => $meta) {
+							if (is_int($index)) {
+								if (is_array($meta)) {
+									if (isset($meta['id'])) {
+										unset($meta['id']);
+									}
+									if (isset($meta['private'])) {
+										unset($meta['private']);
+									}
+									if (!isset($meta['width_units'])) {
+										$meta['width_units'] = 'px';
+									}
+									if (!isset($meta['height_units'])) {
+										$meta['height_units'] = 'px';
+									}
+									$upgraded[$index] = $meta;
+								}
+								else {
+									$upgraded[$index] = $meta;
+								}
+							}
+							else {
+								$upgraded[$index] = $meta;
+							}
+						}	// end-foreach(...)
+						if (count($upgraded) > 0) {
+							update_option('widget_wp_quadratumwidget', $upgraded);
+						}
+					}
+
+					if (isset($options['cloudmade_key'])) {
+						unset($options['cloudmade_key']);
+					}
+
+					$this->admin_upgrade_option($options, 'openmq_key', '');
+					$this->admin_upgrade_option($options, 'microsoft7_key', '');
+				
 					$options['version'] = WP_Quadratum::VERSION;
 					$upgrade_settings = true;
 
@@ -223,8 +298,10 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 	function admin_display_settings () {
 		$options = $this->admin_save_settings ();
 		
-		$auth_plugin_installed = WP_Quadratum::is_wpna_installed ();
-		$auth_plugin_active = WP_Quadratum::is_wpna_active ();
+		//$auth_plugin_installed = WP_Quadratum::is_wpna_installed ();
+		//$auth_plugin_active = WP_Quadratum::is_wpna_active ();
+		$auth_plugin_installed = false;
+		$auth_plugin_active = false;
 		
 		$wrapped_content = array ();
 		$foursquare_settings = array ();
@@ -234,58 +311,39 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 
 		$maps_settings = array ();
 		$googlev3_settings = array ();
-		//$leaflet_settings = array ();
-		$cloudmade_settings = array ();
+		$leaflet_settings = array ();
+		//$cloudmade_settings = array ();
 		$openlayers_settings = array ();
-		//$openmq_settings = array ();
+		$openmq_settings = array ();
+		$bingv7_settings = array();
 		
 		$tab = $this->admin_validate_tab ();
-		$providers = $this->mxn->get_supported_providers ();
+		//$providers = $this->mxn->get_supported_providers ();
+		$maps = WP_Mapstraction::get_instance()->get_supported_maps();
 		
 		switch ($tab) {
 			case 'maps':
 				/****************************************************************************
  	 	 	 	 * Maps API Selection & Authentication tab content
  	 	 	 	 */
-				$maps_settings[] = '<p><em>' . __('This tab allows you to choose which Mapstraction mapping API will be used to show your Foursquare checkins. Note that not all supported Mapstraction APIs are shown here; support for more mapping APIs will be added in a future release.', 'wp-quadratum') . '</em></p>';
+				$maps_settings[] = '<p><em>' . __('This tab allows you to choose which Mapstraction mapping API will be used to show your Foursquare checkins. Note that not all supported Mapstraction APIs are shown here; support for more mapping APIs may be added in a future release.', 'wp-quadratum') . '</em></p>';
 
 				$maps_settings[] = '<select name="wp_quadratum_map_provider" id="wp-quadratum-map-provider">';
-				foreach ($providers as $provider => $chars) {
-					$maps_settings[] = '<option value="' . $provider . '"' . selected ($options['provider'], $provider, false) . '>' . $chars['description'] . '</option>';
+				foreach ($maps as $map => $meta) {
+					$maps_settings[] = '<option value="' . $map . '"' . selected ($options['provider'], $map, false) . '>' . $meta['description'] . '</option>';
 				}	// end-foreach
 				$maps_settings[] = '</select>';
 
-				if ($auth_plugin_installed && $auth_plugin_active) {
-					$helper = new WPNokiaAuthHelper ();
+				$nokia_settings[] = '<p>'
+					. sprintf (__('You\'ve selected HERE Maps. To use HERE Maps, you\'ll need an App ID and Token; you can get them from the <a href="%1$s" target="_blank">HERE Developer site</a>.'), 'https://developer.here.com/web/guest/myapps')
+					. '</p>';
+				$nokia_settings[] = '<p><strong>' . __('App ID') . '</strong><br />
+					<input type="text" name="wp_quadratum_nokia_app_id" id="wp_quadratum_nokia_app_id" value="' . $options['nokia_app_id'] . '" size="35" /><br />
+					<small>' . __('Enter your registered HERE App ID') . '</small></p>';
 
-					$nokia_settings[] = '<div class="wp-quadratum-success">'
-						. __('WP Nokia Auth is installed and active')
-						. '</div>';
-					$nokia_settings[] = '<p><strong>' . __('App ID') . '</strong></p>
-						<input type="text" size="30" disabled value="' . $helper->get_id () . '"><br />';
-					$nokia_settings[] = '<p><strong>' . __('Token / App Code') . '</strong></p>
-						<input type="text" size="30" disabled value="' . $helper->get_token () . '"><br />';
-				}
-
-				else {
-					if ($auth_plugin_installed && !$auth_plugin_active) {
-						$auth_plugin_status = "installed but not activated";
-					}
-					else {
-						$auth_plugin_status = "not installed";
-					}
-					
-					$nokia_settings[] = '<p>'
-						. sprintf (__('You\'ve selected Nokia Maps. To use Nokia Maps, you\'ll need API keys; you get get them from the <a href="%1$s" target="_blank">Nokia Developer site</a>. You can use the <a href="%2$s" target="_blank">WP Nokia Auth</a> plugin (<em>%3$s</em>) to manage your Nokia API keys or you can enter them below.'), 'http://api.developer.nokia.com/', 'http://wordpress.org/extend/plugins/wp-nokia-auth/', $auth_plugin_status)
-						. '</p>';
-					$nokia_settings[] = '<p><strong>' . __('App ID') . '</strong><br />
-						<input type="text" name="wp_quadratum_nokia_app_id" id="wp_quadratum_nokia_app_id" value="' . $options['nokia_app_id'] . '" size="35" /><br />
-						<small>' . __('Enter your registered Nokia Location API App ID') . '</small></p>';
-
-					$nokia_settings[] = '<p><strong>' . __('Token / App Code') . '</strong><br />
-						<input type="text" name="wp_quadratum_nokia_app_token" id="wp_quadratum_nokia_app_token" value="' . $options['nokia_app_token'] . '" size="35" /><br />
-						<small>' . __('Enter your registered Nokia Location API Token / App Code') . '</small></p>';
-				}
+				$nokia_settings[] = '<p><strong>' . __('App Token') . '</strong><br />
+					<input type="text" name="wp_quadratum_nokia_app_token" id="wp_quadratum_nokia_app_token" value="' . $options['nokia_app_token'] . '" size="35" /><br />
+					<small>' . __('Enter your registered HERE App Token') . '</small></p>';
 				
 				$googlev3_settings[] = '<p><em>'
 					. __('You\'ve selected Google Maps. To use Google Maps, you\'ll need an API key; you can get one from the <a href="https://code.google.com/apis/console/" target="_blank">Google Code APIs Console</a>.', 'wp-quadratum')
@@ -296,27 +354,40 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 					. '" /><br />
 					<small>' . __('Enter your Google Maps API key', 'wp-quadratum') . '</small></p>';
 
-				//$leaflet_settings[] = '<p><em>'
-				//	. __('You\'ve selected Leaflet Maps. That\'s all there is. No settings, no API key, no options.', 'wp-quadratum')
-				//	. '</em></p>';
+				$leaflet_settings[] = '<p><em>'
+					. __('You\'ve selected Leaflet Maps. That\'s all there is. No settings, no API key, no options.', 'wp-quadratum')
+					. '</em></p>';
 
-				$cloudmade_settings[] = '<p><em>'
+				/*$cloudmade_settings[] = '<p><em>'
 					. __('You\'ve selected CloudMade Maps. To use CloudMade Maps, you\'ll need an API key; you can get one from the <a href="http://developers.cloudmade.com/projects" target="_blank">CloudMade Developer Zone</a>.', 'wp-quadratum')
 					. '</em></p>';
 				$cloudmade_settings[] = '<p><strong>' . __("CloudMade API Key", 'wp-quadratum') . '</strong><br />
 					<input type="text" name="wp_quadratum_cloudmade_key" id="wp-quadratum-cloudmade-key" size="40" value="'
 					. $options["cloudmade_key"]
 					. '" /><br />
-					<small>' . __('Enter your CloudMade API key', 'wp-quadratum') . '</small></p>';
+					<small>' . __('Enter your CloudMade API key', 'wp-quadratum') . '</small></p>';*/
 
 				$openlayers_settings[] = '<p><em>'
 					. __('You\'ve selected OpenLayers Maps. That\'s all there is. No settings, no API key, no options.', 'wp-quadratum')
 					. '</em></p>';
 					
-				//$openmq_settings[] = '<p><em>'
-				//	. __('You\'ve selected MapQuest Open Maps. That\'s all there is. No settings, no API key, no options.', 'wp-quadratum')
-				//	. '</em></p>';
-					
+				$openmq_settings[] = '<p><em>'
+					. __('You\'ve selected MapQuest Open Maps. To use these, you\'ll need an app key; you can get one from the <a href="http://developer.mapquest.com/web/info/account/app-keys" target="_blank">MapQuest Application Keys page</a>.', 'wp-quadratum')
+					. '</em></p>';
+				$openmq_settings[] = '<p><strong>' . __("MapQuest App Key", 'wp-quadratum') . '</strong><br />
+					<input type="text" name="wp_quadratum_openmq_key" id="wp-quadratum-openmq-key" size="40" value="'
+					. $options["openmq_key"]
+					. '" /><br />
+					<small>' . __('Enter your MapQuest App Key', 'wp-quadratum') . '</small></p>';
+
+				$microsoft7_settings[] = '<p><em>'
+					. __('You\'ve selected Bing v7 Maps. To use these, you\'ll need an API key; you can get one from the <a href="http://www.bingmapsportal.com/application" target="_blank">Bing Maps Portal</a>.', 'wp-quadratum')
+					. '</em></p>';
+				$microsoft7_settings[] = '<p><strong>' . __("Bing API Key", 'wp-quadratum') . '</strong><br />
+					<input type="text" name="wp_quadratum_microsoft7_key" id="wp-quadratum-microsoft7-key" size="40" value="'
+					. $options["microsoft7_key"]
+					. '" /><br />
+					<small>' . __('Enter your Bing API key', 'wp-quadratum') . '</small></p>';
 				break;
 				
 			case 'defaults':
@@ -341,7 +412,7 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 				
 				$colophon_settings[] = '<p><em>"When it comes to software, I much prefer free software, because I have very seldom seen a program that has worked well enough for my needs and having sources available can be a life-saver"</em>&nbsp;&hellip;&nbsp;Linus Torvalds</p>';
 				$colophon_settings[] = '<p>'
-					. __('For the inner nerd in you, the latest version of WP Quadratum was written using <a href="http://macromates.com/">TextMate</a> on a MacBook Pro running OS X 10.7.3 Lion and tested on the same machine running <a href="http://mamp.info/en/index.html">MAMP</a> (Mac/Apache/MySQL/PHP) before being let loose on the author\'s <a href="http://www.vicchi.org/">blog</a>.')
+					. __('For the inner nerd in you, the latest version of WP Quadratum was written using <a href="http://macromates.com/">TextMate</a> on a MacBook Pro running OS X 10.8.4 Mountain Lion and tested on the same machine running <a href="http://mamp.info/en/index.html">MAMP</a> (Mac/Apache/MySQL/PHP) before being let loose on the author\'s <a href="http://www.vicchi.org/">blog</a>.')
 					. '<p>';
 				$colophon_settings[] = '<p>'
 					. __('The official home for WP Quadratum is on <a href="http://www.vicchi.org/codeage/wp-quadratum/">Gary\'s Codeage</a>; it\'s also available from the official <a href="http://wordpress.org/extend/plugins/wp-quadratum/">WordPress plugins repository</a>. If you\'re interested in what lies under the hood, the code is also on <a href="https://github.com/vicchi/wp-quadratum">GitHub</a> to download, fork and otherwise hack around.')
@@ -373,21 +444,26 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 						. '</div>';
 
 					$foursquare_settings[] = '<div><p>'
-						. __('To display your Foursquare checkins, WP Quadratum needs to be authorised to access your Foursquare account information; this is a simple, safe and secure 3 step process. QP Quadratum never sees your account login information and cannot store any personally identifiable information.')
+						. __('To display your Foursquare checkins, WP Quadratum needs to be authorised to access your Foursquare account information; this is a simple, safe and secure 3 step process. WP Quadratum never sees your account login information and cannot store any personally identifiable information.')
 						. '</p>'
 						. '<p><strong>'
-						. sprintf (__('Step 1. Register this WordPress site as a Foursquare application on the <a target="_blank" href="%s">Foursquare OAuth Consumer Registration</a> page'), 'https://foursquare.com/oauth/register')
+						. sprintf (__('Step 1. Register this WordPress site as a Foursquare app on the <a target="_blank" href="%s">Foursquare App Registration</a> page'), 'https://foursquare.com/developers/register')
 						. '</strong></p><p>'
 						. __('If you\'re not currently logged into your Foursquare account, you\'ll need to login with the Foursquare account whose checkins you want WP Quadratum to display.')
+
 						. '<ol>'
-						. '<li>' . __('The <strong>Application Name</strong> is a label you want to use to identify this connection to your Foursquare account') . '</li>'
-						. '<li>' . sprintf (__('The <strong>Application Web Site</strong> is the URL of this Wordpress site, which is <strong>%s</strong>'), home_url ()) . '</li>'
-						. '<li>' . sprintf (__('The <strong>Callback URL</strong> should be set to <strong>%s</strong>'), plugins_url() . '/wp-quadratum/includes/wp-quadratum-callback.php') . '</li>'
+						. '<li>' . __('<strong>Your app name</strong> is a label you will use to identify this connection to your Foursquare account', 'wp-quadratum') . '</li>'
+						. '<li>' . sprintf (__('The <strong>Download / welcome page url</strong> is the URL of your WordPress site - <em>%s</em>', 'wp-quadratum'), home_url ()) . '</li>'
+						. '<li>' . __('The <strong>Your privacy policy url</strong> can be left blank', 'wp-quadratum') . '</li>'
+						. '<li>' . sprintf (__('The <strong>Redirect URI(s)</strong> should be set to <em>%s</em>', 'wp-quadratum'), plugins_url () . '/wp-quadratum/includes/wp-quadratum-callback.php') . '</li>'
+						. '<li>' . __('The <strong>Push API Notifications</strong> should be set to <em>Disable pushes to this app</em>', 'wp-quadratum') . '</li>'
+						. '<li>' . __('The <strong>Gallery info</strong> and <strong>Install options</strong> sections can be left blank and at their default values', 'wp-quadratum') . '</li>'
+						. '<li>' . __('Click on <em>Save Changes</em> to generate your Foursquare app keys.</li>', 'wp-quadratum')
 						. '</ol>'
-						. __('Once you have successfully registered your site, you\'ll be provided with two <em>keys</em>, the <em>client id</em> and the <em>client secret</em>')
+						. __('Once you have successfully registered your site, you\'ll be provided with two <em>keys</em>, the <em>Client id</em> and the <em>Client secret</em>')
 						. '</p>'
 						. '<p><strong>'
-						. __('Step 2. Copy and paste the supplied Client ID and Client Secret below and click on the "Save Foursquare Settings" button')
+						. __('Step 2. Copy and paste the supplied Client id and Client secret below and click on the "Save Foursquare Settings" button')
 						. '</strong></p>';
 
 					$foursquare_settings[] = '<p><strong>' . __('Foursquare Client ID') . '</strong><br />
@@ -400,7 +476,7 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 
 					if (!empty ($options['client_id'])) {
 						$foursquare_settings[] = '<p><strong>'
-						. __('Step 3. You should now be authorised and ready to go; click on the Connect button below.')
+						. __('Step 3. You should now be authorised and ready to go; click on the <em>Connect to Foursquare</em> button below.')
 						. '</strong></p>';
 
 						$client_id = $options['client_id'];
@@ -444,11 +520,11 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 					'Maps Provider', implode ('', $maps_settings));
 
 				$current_provider = $options['provider'];
-				foreach ($providers as $provider => $chars) {
-					$id = 'wp-quadratum-' . $provider . '-settings';
-					$title = $chars['description'] . ' Settings';
-					$hidden = ($current_provider != $provider);
-					$block = $provider . '_settings';
+				foreach ($maps as $map => $meta) {
+					$id = 'wp-quadratum-' . $map . '-settings';
+					$title = $meta['description'] . ' Settings';
+					$hidden = ($current_provider != $map);
+					$block = $map . '_settings';
 					$wrapped_content[] = $this->admin_postbox ($id, $title, implode ('', $$block), $hidden);
 				}	// end-foreach
 				break;
@@ -513,7 +589,8 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 						$options['nokia_app_id'] = html_entity_decode ($this->admin_option ('wp_quadratum_nokia_app_id'));
 						$options['nokia_app_token'] = html_entity_decode ($this->admin_option ('wp_quadratum_nokia_app_token'));
 						$options['google_key'] = html_entity_decode ($this->admin_option ('wp_quadratum_google_key'));
-						$options['cloudmade_key'] = html_entity_decode ($this->admin_option ('wp_quadratum_cloudmade_key'));
+						$options['openmq_key'] = html_entity_decode ($this->admin_option ('wp_quadratum_openmq_key'));
+						$options['microsoft7_key'] = html_entity_decode ($this->admin_option ('wp_quadratum_microsoft7_key'));
 						break;
 						
 					case 'defaults':
@@ -589,7 +666,7 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 
 	function admin_wrap ($tab, $title, $content) {
 		$action = admin_url ('options-general.php');
-		$action .= '?page=wp-quadratum/includes/wp-quadratum-admin.php&tab=' . $tab;
+		$action .= '?page=wp-quadratum/includes/class-wp-quadratum-admin.php&tab=' . $tab;
 	?>
 	    <div class="wrap">
 	        <h2><?php echo $title; ?></h2>
@@ -707,7 +784,7 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 		
 		foreach (self::$tab_names as $tab => $name) {
 			$class = ($tab == $current) ? ' nav-tab-active' : '';
-			$content[] = "<a class='nav-tab$class' href='options-general.php?page=wp-quadratum/includes/wp-quadratum-admin.php&tab=$tab'>$name</a>";
+			$content[] = "<a class='nav-tab$class' href='options-general.php?page=wp-quadratum/includes/class-wp-quadratum-admin.php&tab=$tab'>$name</a>";
 		}	// end-foreach (...)
 		
 		$content[] = '</h2>';
@@ -741,6 +818,6 @@ class WP_QuadratumAdmin extends WP_PluginBase_v1_1 {
 	
 }	// end-class WP_QuadratumAdmin
 
-$__wp_quadratumadmin_instance = new WP_QuadratumAdmin;
+WP_QuadratumAdmin::get_instance();
 
 ?>
