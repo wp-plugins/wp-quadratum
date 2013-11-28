@@ -5,8 +5,11 @@ if (!class_exists('WP_Quadratum')) {
 		private static $instance;
 	
 		const OPTIONS = 'wp_quadratum_settings';
-		const VERSION = '130';
-		const DISPLAY_VERSION = 'v1.3.0';
+		const CACHE = 'wp_quadratum_cache';
+		const LOCALITY_CACHE = 'locality';
+		const CHECKIN_CACHE = 'checkin';
+		const VERSION = '1311';
+		const DISPLAY_VERSION = 'v1.3.1';
 	
 		/**
 		 * Class constructor
@@ -165,11 +168,25 @@ if (!class_exists('WP_Quadratum')) {
 						"google_sensor" => "false",
 						//"cloudmade_key" => "",
 						'openmq_key' => '',
-						'bingv7_key' => ''
+						'bingv7_key' => '',
+						'enable_map_sc' => 'on',
+						'enable_locality_sc' => '',
+						'factual_oauth_key' => '',
+						'factual_oauth_secret' => ''
 						)
 					);
 
 				update_option (self::OPTIONS, $settings);
+			}
+			
+			$cache = WP_Quadratum::get_cache();
+			if (!is_array($cache)) {
+				$cache = array(
+					'timestamp' => time(),
+					'checkin' => null,
+					'locality' => null
+				);
+				update_option(self::CACHE, $cache);
 			}
 		}
 	
@@ -202,6 +219,18 @@ if (!class_exists('WP_Quadratum')) {
 				return $options;
 			}
 		}
+		
+		static function get_cache($key=NULL) {
+			$cache = get_option(self::CACHE);
+
+			if (isset($key) && !empty($key)) {
+				return json_decode($cache[$key]);
+			}
+			
+			else {
+				return $cache;
+			}
+		}
 
 		/**
 		 * Adds/updates a settings/option key and value in the back-end database.
@@ -210,12 +239,18 @@ if (!class_exists('WP_Quadratum')) {
 		 * @param string value Value to be associated with the specified settings/option key
 		 */
 
-		static function set_option ($key, $value) {
-			$options = get_options (self::OPTIONS);
+		static function set_option($key, $value) {
+			$options = get_option(self::OPTIONS);
 			$options[$key] = $value;
-			update_option (self::OPTIONS, $options);
+			update_option(self::OPTIONS, $options);
 		}
 
+		static function set_cache($key, $value) {
+			$cache = get_option(self::CACHE);
+			$cache['timestamp'] = time();
+			$cache[$key] = json_encode($value);
+			update_option(self::CACHE, $cache);
+		}
 
 		/**
 		 * Helper function to determine if debugging is enabled in WordPress and/or
@@ -268,8 +303,13 @@ if (!class_exists('WP_Quadratum')) {
 			$fsq = new FoursquareHelper_v1_0 ($client_id, $client_secret, $redirect_url);
 			$fsq->set_access_token ($oauth_token);
 			$rsp = $fsq->get_private ($endpoint, $params);
-			$json = json_decode ($rsp);
-			return $json;
+
+			if ($rsp !== false) {
+				$json = json_decode($rsp);
+				return $json;
+			}
+			
+			return $rsp;
 		}
 
 	}	// end-class WP_Quadratum
