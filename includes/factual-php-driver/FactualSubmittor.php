@@ -60,17 +60,6 @@
  	} 	
  	
  	/**
- 	 * Adds key/value pairs to object
- 	 * @param string key Field/Column name
- 	 * @param mixed value Value to add/edit/update
- 	 * @return array set values
- 	 */
- 	public function setValue($key,$value){
- 		$this->values[$key] = $value;
- 		return $this->values;
- 	}
- 	
- 	/**
  	 * Adds array of key/value pairs to object
  	 * @param array data key/value pairs to add/update
  	 * @return array set values

@@ -13,7 +13,8 @@
 	public $user = null; //Arbitrary User token
 	//Optional Params
 	public $comment = null;
-	public $reference = null;	
+	public $reference = null;
+	public $values = null;
 	
  	//Getters
  	public function getTableName(){
@@ -43,7 +44,18 @@
   	protected function getPostVars(){
  		return array("user","reference");
  	}
- 	 	
+
+ 	/**
+ 	 * Adds key/value pairs to object
+ 	 * @param string key Field/Column name
+ 	 * @param mixed value Value to add/edit/update
+ 	 * @return array set values
+ 	 */
+ 	public function setValue($key,$value){
+ 		$this->values[$key] = $value;
+ 		return $this->values;
+ 	}
+ 	
  	/**
  	 * Returns key/value pairs. JSON-encodes any arrays
  	 * @internal we'd usually do a reawurlencode() here. Note however that the oauth lib performs this function.

@@ -32,7 +32,7 @@ class Factual {
 	protected $fetchQueue = array (); //array of queries teed up for multi
 	protected $debug = false; //debug flag
 	protected $curlTimeout = 0; //maximum number of seconds for the network function to execute (0 = no timeout)
-	protected $connectTimeout = 2; //maximum number of seconds to connect to the server (0 = no timeout)
+	protected $connectTimeout = 0; //maximum number of seconds to connect to the server (0 = no timeout)
 
 	/**
 	 * Constructor. Creates authenticated access to Factual.
@@ -222,12 +222,26 @@ class Factual {
 	}
 
 	/**
+	 * Improves search results by associating query with selected record
+	 * @param object factualBoost object
+	 * @return object 
+	 */
+	public function boost($factualBoost) {
+		//check parameter type
+		if (!$factualBoost instanceof FactualBoost) {
+			throw new Exception("FactualBoost object required as parameter of " . __METHOD__);
+			return false;
+		}
+		return new BareResponse($this->request($this->urlForBoost($factualBoost->getTableName()),"POST",$factualBoost->toUrlParams()));
+	}
+	
+	/**
 	 * @return object SchemaResponse object
 	 */
 	public function schema($tableName) {
 		return new SchemaResponse($this->request($this->urlForSchema($tableName)));
 	}
-
+	
 	protected function urlForSchema($tableName) {
 		return $this->factHome . "t/" . $tableName . "/schema";
 	}
@@ -285,7 +299,11 @@ class Factual {
 			return $this->factHome . "t/" . $tableName . "/submit";
 		}
 	}
-	
+
+	protected function urlForBoost($tableName) {
+			return $this->factHome . "t/" . $tableName . "/boost";
+	}
+		
 	protected function urlForClear($tableName, $factualID) {
 			return $this->factHome . "t/" . $tableName . "/" . $factualID . "/clear";
 	}	
@@ -439,7 +457,7 @@ class Factual {
 	 * @param string urlStr unsigned URL request
 	 * @return array ex: array ('code'=>int, 'headers'=>array(), 'body'=>string)
 	 */
-	protected function request($urlStr, $requestMethod = "GET", $params = null) {
+	protected function request($urlStr, $requestMethod="GET", $params = null) {
 		//custom headers
 		$curlOptions[CURLOPT_HTTPHEADER] = array ();
 		$curlOptions[CURLOPT_HTTPHEADER][] = "X-Factual-Lib: " . $this->config['factual']['driverversion'];
